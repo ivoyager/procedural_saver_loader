@@ -3,4 +3,4 @@ SaverLoader (saver_loader.gd) can save procedural scene trees of arbitrary struc
 
 This system is used in [I, Voyager](https://ivoyager.dev) to save/load a procedurally built Solar System with >100 planets & moons and up to 600,000+ asteroids. Our save/load times with an ssd drive are on the order of ~1 second!
 
-For detailed how-to-guide, see [here](https://ivoyager.dev/forum/index.php?p=/discussion/26/how-to-guide-save-load-persistence-in-your-project).
+For a detailed how-to-guide, and to get help or give feedback, please go [here](https://ivoyager.dev/forum/index.php?p=/discussion/26/how-to-guide-save-load-persistence-in-your-project).
