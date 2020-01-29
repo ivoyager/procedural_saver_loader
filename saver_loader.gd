@@ -1,7 +1,7 @@
 # saver_loader.gd
 # This file is part of I, Voyager
 # https://ivoyager.dev
-# Copyright (c) 2017-2019 Charlie Whitfield
+# Copyright (c) 2017-2020 Charlie Whitfield
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -48,6 +48,9 @@
 # Warnings:
 #    1. A single table or dict persisted in two places will become two on load
 #    2. Persisted strings cannot begin with object_tag.
+#    3. Be careful not to have both pesist and non-persist references to the
+#       same object. The old (pre-load) object will still be there in the non-
+#       persist reference after load.
 
 extends Reference
 class_name SaverLoader
@@ -107,6 +110,7 @@ var _prog_serialized := 0
 var _prog_deserialized := 0
 var _log_count := 0
 var _log_count_by_class := {}
+var _log := ""
 
 # *************************** PUBLIC FUNCTIONS ********************************
 
@@ -122,6 +126,18 @@ static func make_object_or_scene(script: Script) -> Object:
 		root_node.set_script(script)
 	return root_node
 
+static func free_procedural_nodes(node: Node, is_root := true) -> void:
+	# call with node = root
+	if !is_root:
+		if node.PERSIST_AS_PROCEDURAL_OBJECT:
+			node.queue_free() # children will also be freed!
+			return
+	else:
+		assert(node is Viewport)
+	for child in node.get_children():
+		if "PERSIST_AS_PROCEDURAL_OBJECT" in child:
+			free_procedural_nodes(child, false)
+
 func project_init():
 	# Ignore; required for I, Voyager compatibility
 	pass
@@ -134,6 +150,7 @@ func save_game(save_file: File, tree: SceneTree) -> void: # Assumes save_file al
 	_prog_serialized = 0
 	if use_thread:
 		_thread = Thread.new()
+		# warning-ignore:return_value_discarded
 		_thread.start(self, "_threaded_save", save_file)
 	else:
 		_threaded_save(save_file)
@@ -164,31 +181,21 @@ func load_game(save_file: File, tree: SceneTree) -> void:
 	yield(_tree, "idle_frame")
 	if use_thread:
 		_thread = Thread.new()
+		# warning-ignore:return_value_discarded
 		_thread.start(self, "_threaded_load", save_file)
 	else:
 		_threaded_load(save_file)
 
-func free_procedural_nodes(node: Node, is_root := true) -> void:
-	# call with node = root
-	if !is_root:
-		if node.PERSIST_AS_PROCEDURAL_OBJECT:
-			node.queue_free() # children will also be freed!
-			return
-	else:
-		assert(node is Viewport)
-	for child in node.get_children():
-		if "PERSIST_AS_PROCEDURAL_OBJECT" in child:
-			free_procedural_nodes(child, false)
+# ***************************** DEBUG LOGGING *********************************
 
-func debug_log(str_message: String, tree: SceneTree) -> bool:
+func debug_log(tree: SceneTree) -> String:
 	# Call before and after ALL external save/load stuff completed. Wrap in
 	# in assert to compile only in debug builds, e.g.:
-	#    assert(saver_loader.debug_log("This is before save", get_tree()))
+	# assert(print(saver_loader.debug_log(get_tree())) or true)
 	_tree = tree
 	_root = tree.get_root()
-	Debug.logd(str_message)
-	Debug.logd("Number tree nodes: ", _tree.get_node_count())
-	Debug.logd("Memory usage: ", OS.get_dynamic_memory_usage())
+	_log += "Number tree nodes: %s\n" % _tree.get_node_count()
+	_log += "Memory usage: %s\n" % OS.get_dynamic_memory_usage()
 	# This doesn't work: OS.dump_memory_to_file(mem_dump_path)
 	if debug_print_stray_nodes:
 		print("Stray Nodes:")
@@ -206,22 +213,22 @@ func debug_log(str_message: String, tree: SceneTree) -> bool:
 		_log_count_by_class.clear()
 		_log_nodes(_root)
 		if last_log_count_by_class:
-			Debug.logd("Class counts difference from last count:")
+			_log += "Class counts difference from last count:\n"
 			for class_ in _log_count_by_class:
 				if last_log_count_by_class.has(class_):
-					Debug.logd(class_, _log_count_by_class[class_] - last_log_count_by_class[class_])
+					_log += "%s %s\n" % [class_, _log_count_by_class[class_] - last_log_count_by_class[class_]]
 				else:
-					Debug.logd(class_, _log_count_by_class[class_])
+					_log += "%s %s\n" % [class_, _log_count_by_class[class_]]
 			for class_ in last_log_count_by_class:
 				if !_log_count_by_class.has(class_):
-					Debug.logd(class_, -last_log_count_by_class[class_])
+					_log += "%s %s\n" % [class_, -last_log_count_by_class[class_]]
 		else:
-			Debug.logd("Class counts:")
+			_log += "Class counts:\n"
 			for class_ in _log_count_by_class:
-				Debug.logd(class_, _log_count_by_class[class_])
-	return true
-
-# ********************* VIRTUAL & PRIVATE FUNCTIONS ***************************
+				_log += "%s %s\n" % [class_, _log_count_by_class[class_]]
+	var return_log := _log
+	_log = ""
+	return return_log
 
 func _log_nodes(node: Node) -> void:
 	_log_count += 1
@@ -230,10 +237,12 @@ func _log_nodes(node: Node) -> void:
 		_log_count_by_class[class_] += 1
 	else:
 		_log_count_by_class[class_] = 1
-	Debug.logd(_log_count, node, node.name)
+	_log += "%s %s %s\n" % [_log_count, node, node.name]
 	for child in node.get_children():
 		if debug_log_all_nodes or "PERSIST_AS_PROCEDURAL_OBJECT" in child:
 			_log_nodes(child)
+
+# ********************* VIRTUAL & PRIVATE FUNCTIONS ***************************
 
 func _clear():
 	_sfile_n_objects = 0
@@ -457,8 +466,7 @@ func _serialize_object_data(object: Object, serialized_object: Array) -> void:
 				objects_array.append(object.get(property))
 			var serialized_objects_array := _get_serialized_objects_array(objects_array)
 			serialized_object.append(serialized_objects_array)
-		
-# warning-ignore:unused_argument
+
 func _deserialize_object_data(serialized_object: Array, data_index: int) -> void:
 	# The order of persist properties must be exactly the same from game save
 	# to game load. However, if a newer version (loading an older save) has
