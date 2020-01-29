@@ -6,3 +6,5 @@ This system is used in [I, Voyager](https://ivoyager.dev) to save/load a procedu
 For a detailed how-to-guide, and to get help or give feedback, please see post in either:
 * [I, Voyager Forum](https://ivoyager.dev/forum/index.php?p=/discussion/26/how-to-guide-save-load-persistence-in-your-project), or
 * [Godot Forum](https://godotforums.org/discussion/21507/saverloader-save-load-procedural-scene-trees-of-arbitrary-structure).
+
+Current version is 1.1 (saver_loader.gd from I, Voyager version 0.0.5).
